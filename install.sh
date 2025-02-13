@@ -507,6 +507,7 @@ readInstallProtocolType() {
 
                 currentRealityPublicKey=$(jq -r .inbounds[0].streamSettings.realitySettings.publicKey "${row}.json")
                 currentRealityPrivateKey=$(jq -r .inbounds[0].streamSettings.realitySettings.privateKey "${row}.json")
+                frontingTypeReality=07_VLESS_vision_reality_inbounds
 
             elif [[ "${coreInstallType}" == "2" ]]; then
                 frontingTypeReality=07_VLESS_vision_reality_inbounds
@@ -1134,10 +1135,12 @@ installTools() {
 
     if ! find /usr/bin /usr/sbin | grep -q -w dig; then
         echoContent green " ---> 安装dig"
-        if echo "${installType}" | grep -q -w "apt"; then
+        if echo "${installType}" | grep -qw "apt"; then
             ${installType} dnsutils >/dev/null 2>&1
-        elif echo "${installType}" | grep -qwE "yum|apk"; then
+        elif echo "${installType}" | grep -qw "yum"; then
             ${installType} bind-utils >/dev/null 2>&1
+        elif echo "${installType}" | grep -qw "apk"; then
+            ${installType} bind-tools >/dev/null 2>&1
         fi
     fi
 
@@ -2724,32 +2727,28 @@ EOF
 # 安装alpine开机启动
 installAlpineStartup() {
     local serviceName=$1
-    local startCommand=$2
+    if [[ "${serviceName}" == "sing-box" ]]; then
+        cat <<EOF >"/etc/init.d/${serviceName}"
+#!/sbin/openrc-run
 
-    cat <<EOF >"/etc/init.d/${serviceName}"
-#!/bin/sh
-
-case "\$1" in
-  start)
-    echo "Starting ${serviceName}"
-    ${startCommand} >/dev/null 2>&1 &
-    ;;
-  stop)
-    echo "Stopping ${serviceName}"
-    pgrep -f ${serviceName}|xargs kill -9 >/dev/null 2>&1
-    ;;
-  restart)
-    rc-service ${serviceName} stop
-    rc-service ${serviceName} start
-    ;;
-  *)
-    echo "Usage: rc-service ${serviceName} {start|stop|restart}"
-    exit 1
-    ;;
-esac
-
-exit 0
+description="sing-box service"
+command="/etc/v2ray-agent/sing-box/sing-box"
+command_args="run -c /etc/v2ray-agent/sing-box/conf/config.json"
+command_background=true
+pidfile="/var/run/sing-box.pid"
 EOF
+    elif [[ "${serviceName}" == "xray" ]]; then
+        cat <<EOF >"/etc/init.d/${serviceName}"
+#!/sbin/openrc-run
+
+description="xray service"
+command="/etc/v2ray-agent/xray/xray"
+command_args="run -confdir /etc/v2ray-agent/xray/conf"
+command_background=true
+pidfile="/var/run/xray.pid"
+EOF
+    fi
+
     chmod +x "/etc/init.d/${serviceName}"
 }
 
@@ -2784,7 +2783,7 @@ WantedBy=multi-user.target
 EOF
         bootStartup "sing-box.service"
     elif [[ "${release}" == "alpine" ]]; then
-        installAlpineStartup "sing-box" "${execStart}"
+        installAlpineStartup "sing-box"
         bootStartup "sing-box"
     fi
 
@@ -2816,7 +2815,7 @@ EOF
         bootStartup "xray.service"
         echoContent green " ---> 配置Xray开机自启成功"
     elif [[ "${release}" == "alpine" ]]; then
-        installAlpineStartup "xray" "${execStart}"
+        installAlpineStartup "xray"
         bootStartup "xray"
     fi
 }
@@ -3879,25 +3878,30 @@ removeSingBoxConfig() {
 }
 
 # 初始化wireguard出站信息
-addSingBoxWireGuardOut() {
-    readConfigWarpReg
-    cat <<EOF >"${singBoxConfigPath}wireguard_outbound.json"
-{
-     "outbounds": [
+addSingBoxWireGuardEndpoints() {
+    local type=$1
 
+    readConfigWarpReg
+
+    cat <<EOF >"${singBoxConfigPath}wireguard_endpoints_${type}.json"
+{
+     "endpoints": [
         {
             "type": "wireguard",
-            "tag": "wireguard_out",
-            "server": "162.159.192.1",
-            "server_port": 2408,
-            "local_address": [
-                "172.16.0.2/32",
-                "${addressWarpReg}/128"
+            "tag": "wireguard_endpoints_${type}",
+            "address": [
+                "${address}"
             ],
             "private_key": "${secretKeyWarpReg}",
-            "peer_public_key": "${publicKeyWarpReg}",
-            "reserved":${reservedWarpReg},
-            "mtu": 1280
+            "peers": [
+                {
+                  "address": "162.159.192.1",
+                  "port": 2408,
+                  "public_key": "${publicKeyWarpReg}",
+                  "reserved":${reservedWarpReg},
+                  "allowed_ips": ["0.0.0.0/0","::/0"]
+                }
+            ]
         }
     ]
 }
@@ -4665,7 +4669,7 @@ EOF
         echoContent skyBlue "\n开始配置VMess+ws协议端口"
         echo
         mapfile -t result < <(initSingBoxPort "${singBoxVMessWSPort}")
-        echoContent green "\n ---> VLESS_Vision端口：${result[-1]}"
+        echoContent green "\n ---> VMess_ws端口：${result[-1]}"
 
         checkDNSIP "${domain}"
         removeNginxDefaultConf
@@ -4948,8 +4952,8 @@ EOF
         rm /etc/v2ray-agent/sing-box/conf/config/11_VMess_HTTPUpgrade_inbounds.json >/dev/null 2>&1
     fi
     if [[ -z "$3" ]]; then
-        removeSingBoxConfig wireguard_out_IPv4
-        removeSingBoxConfig wireguard_out_IPv6
+        # removeSingBoxConfig wireguard_out_IPv4
+        # removeSingBoxConfig wireguard_out_IPv6
         removeSingBoxConfig wireguard_out_IPv4_route
         removeSingBoxConfig wireguard_out_IPv6_route
         removeSingBoxConfig wireguard_outbound
@@ -6377,8 +6381,8 @@ removeUser() {
             echo "${vmessHTTPUpgradeResult}" | jq . >${configPath}11_VMess_HTTPUpgrade_inbounds.json
         fi
         reloadCore
+        subscribe false
     fi
-    subscribe false
     manageAccount 1
 }
 # 更新脚本
@@ -6628,10 +6632,10 @@ ipv6Routing() {
             if [[ -n "${singBoxConfigPath}" ]]; then
 
                 removeSingBoxConfig IPv4_out
-                removeSingBoxConfig wireguard_out_IPv4
+                # removeSingBoxConfig wireguard_out_IPv4
                 removeSingBoxConfig wireguard_out_IPv4_route
 
-                removeSingBoxConfig wireguard_out_IPv6
+                # removeSingBoxConfig wireguard_out_IPv6
                 removeSingBoxConfig wireguard_out_IPv6_route
 
                 removeSingBoxConfig wireguard_outbound
@@ -7047,11 +7051,14 @@ addWireGuardRoute() {
     if [[ -n "${singBoxConfigPath}" ]]; then
 
         # rule
-        addSingBoxRouteRule "wireguard_out_${type}" "${domainList}" "wireguard_out_${type}_route"
-        addSingBoxOutbound "wireguard_out_${type}" "wireguard_out"
-        addSingBoxOutbound "01_direct_outbound"
+        addSingBoxRouteRule "wireguard_endpoints_${type}" "${domainList}" "wireguard_endpoints_${type}_route"
+        # addSingBoxOutbound "wireguard_out_${type}" "wireguard_out"
+        if [[ -n "${domainList}" ]]; then
+            addSingBoxOutbound "01_direct_outbound"
+        fi
+
         # outbound
-        addSingBoxWireGuardOut
+        addSingBoxWireGuardEndpoints "${type}"
     fi
 }
 
@@ -7167,21 +7174,23 @@ warpRoutingReg() {
                 removeSingBoxConfig 01_direct_outbound
 
                 # 删除所有分流规则
-                removeSingBoxConfig wireguard_out_IPv4_route
-                removeSingBoxConfig wireguard_out_IPv6_route
+                removeSingBoxConfig wireguard_endpoints_IPv4_route
+                removeSingBoxConfig wireguard_endpoints_IPv6_route
 
                 removeSingBoxConfig IPv6_route
                 removeSingBoxConfig socks5_inbound_route
 
+                addSingBoxWireGuardEndpoints "${type}"
+                addWireGuardRoute "${type}" outboundTag ""
                 if [[ "${type}" == "IPv4" ]]; then
-                    removeSingBoxConfig wireguard_out_IPv6
+                    removeSingBoxConfig wireguard_endpoints_IPv6
                 else
-                    removeSingBoxConfig wireguard_out_IPv4
+                    removeSingBoxConfig wireguard_endpoints_IPv4
                 fi
 
                 # outbound
-                addSingBoxOutbound "wireguard_out_${type}" "wireguard_out"
-                addSingBoxWireGuardOut
+                # addSingBoxOutbound "wireguard_out_${type}" "wireguard_out"
+
             fi
 
             echoContent green " ---> WARP全局出站设置完毕"
@@ -7199,11 +7208,10 @@ warpRoutingReg() {
         fi
 
         if [[ -n "${singBoxConfigPath}" ]]; then
-            removeSingBoxConfig "wireguard_out_${type}_route"
+            removeSingBoxConfig "wireguard_endpoints_${type}_route"
 
-            removeSingBoxConfig "wireguard_out_${type}"
+            removeSingBoxConfig "wireguard_endpoints_${type}"
             addSingBoxOutbound "01_direct_outbound"
-
         fi
 
         echoContent green " ---> 卸载WARP ${type}分流完毕"
@@ -7420,11 +7428,11 @@ setSocks5OutboundRoutingAll() {
         if [[ -n "${singBoxConfigPath}" ]]; then
 
             removeSingBoxConfig IPv4_out
-            removeSingBoxConfig wireguard_out_IPv4
+            # removeSingBoxConfig wireguard_out_IPv4
             removeSingBoxConfig wireguard_out_IPv4_route
 
             removeSingBoxConfig IPv6_out
-            removeSingBoxConfig wireguard_out_IPv6
+            # removeSingBoxConfig wireguard_out_IPv6
             removeSingBoxConfig wireguard_out_IPv6_route
 
             removeSingBoxConfig wireguard_outbound
@@ -8645,66 +8653,88 @@ clashMetaConfig() {
     local id=$2
     cat <<EOF >"/etc/v2ray-agent/subscribe/clashMetaProfiles/${id}"
 mixed-port: 7890
-unified-delay: false
-geodata-mode: true
-tcp-concurrent: false
-find-process-mode: strict
-global-client-fingerprint: chrome
-
 allow-lan: true
+bind-address: "*"
+lan-allowed-ips:
+  - 0.0.0.0/0
+  - ::/0
+find-process-mode: strict
 mode: rule
-log-level: info
-ipv6: true
-
-external-controller: 127.0.0.1:9090
 
 geox-url:
-  geoip: "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geoip.dat"
-  geosite: "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geosite.dat"
-  mmdb: "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/country.mmdb"
+  geoip: "https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geoip.dat"
+  geosite: "https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geosite.dat"
+  mmdb: "https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geoip.metadb"
+
+geo-auto-update: true
+geo-update-interval: 24
+
+log-level: debug
+
+ipv6: true
+
+external-controller: 0.0.0.0:9093
+external-controller-tls: 0.0.0.0:9443
+
+external-controller-cors:
+  allow-private-network: true
+
+global-client-fingerprint: chrome
 
 profile:
   store-selected: true
   store-fake-ip: true
 
 sniffer:
-  enable: false
+  enable: true
+  override-destination: false
   sniff:
+    QUIC:
+      ports: [ 443 ]
     TLS:
-      ports: [443]
+      ports: [ 443 ]
     HTTP:
       ports: [80]
-      override-destination: true
 
-tun:
-  enable: true
-  stack: system
-  dns-hijack:
-    - 'any:53'
-  auto-route: true
-  auto-detect-interface: true
 
 dns:
   enable: true
-  listen: 0.0.0.0:1053
+  prefer-h3: false
+  listen: 0.0.0.0:53
   ipv6: true
-  enhanced-mode: fake-ip
-  fake-ip-range: 28.0.0.1/8
-  fake-ip-filter:
-    - '*'
-    - '+.lan'
   default-nameserver:
-    - 223.5.5.5
+    - 114.114.114.114
+    - 119.29.29.29
+    - 8.8.8.8
+    - tls://1.12.12.12:853
+    - tls://223.5.5.5:853
+    - system
+  enhanced-mode: fake-ip
+
+  fake-ip-range: 198.18.0.1/16
+
+  fake-ip-filter:
+    - '*.lan'
+    - "+.local"
+    - "localhost.ptlogin2.qq.com"
+  use-hosts: true
   nameserver:
-    - 'tls://8.8.4.4#DNS_Proxy'
-    - 'tls://1.0.0.1#DNS_Proxy'
-  proxy-server-nameserver:
+    - 114.114.114.114
+    - 8.8.8.8
+    - tls://223.5.5.5:853
+    - https://doh.pub/dns-query
     - https://dns.alidns.com/dns-query#h3=true
+    - https://mozilla.cloudflare-dns.com/dns-query#DNS&h3=true
+
+  proxy-server-nameserver:
+    - 'tls://8.8.4.4'
+    - 'tls://1.0.0.1'
+
   nameserver-policy:
     "geosite:cn,private":
-      - 223.5.5.5
-      - 114.114.114.114
-      - https://dns.alidns.com/dns-query#h3=true
+      - https://doh.pub/dns-query
+      - https://dns.alidns.com/dns-query
+    "geosite:category-ads-all": rcode://success
 
 proxy-providers:
   ${subscribeSalt}_provider:
@@ -8712,9 +8742,10 @@ proxy-providers:
     path: ./${subscribeSalt}_provider.yaml
     url: ${url}
     interval: 3600
+    proxy: DIRECT
     health-check:
-      enable: false
-      url: http://www.gstatic.com/generate_204
+      enable: true
+      url: https://cp.cloudflare.com/generate_204
       interval: 300
 
 proxy-groups:
@@ -9738,7 +9769,7 @@ menu() {
     cd "$HOME" || exit
     echoContent red "\n=============================================================="
     echoContent green "作者：mack-a"
-    echoContent green "当前版本：v3.3.31"
+    echoContent green "当前版本：v3.4.4"
     echoContent green "Github：https://github.com/mack-a/v2ray-agent"
     echoContent green "描述：八合一共存脚本\c"
     showInstallStatus
