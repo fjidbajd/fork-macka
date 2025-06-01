@@ -9698,7 +9698,7 @@ singBoxVersionManageMenu() {
 menu() {
     cd "$HOME" || exit
     echoContent red "\n=============================================================="
-    echoContent blue "八合一共存脚本\c"
+    echoContent green "八合一共存脚本\c"
     echoContent green "作者：mack-a"
     echoContent green "当前版本：v3.4.13"
     showInstallStatus
