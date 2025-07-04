@@ -41,11 +41,6 @@
 - [脚本使用注意事项](https://www.592083.xyz/archives/1679931532764)
 - [脚本异常处理](https://www.592083.xyz/archives/1684115970026)
 
-# 三、线路推荐
-
-- [VPS选购指南,避坑指南](https://www.592083.xyz/archives/1679975663984)
-
-
 # 四、安装使用
 
 ## 1.下载脚本
@@ -56,10 +51,3 @@
 ```
 wget -P /root -N --no-check-certificate "https://raw.githubusercontent.com/mack-a/v2ray-agent/master/install.sh" && chmod 700 /root/install.sh && /root/install.sh
 ```
-
-```
-
-
-# 七、许可证
-
-[AGPL-3.0](https://github.com/mack-a/v2ray-agent/blob/master/LICENSE)
