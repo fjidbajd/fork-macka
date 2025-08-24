@@ -10,7 +10,7 @@
 *   **分流管理:** 提供wireguard、IPv6、Socks5、DNS、VMess(ws)、SNI反向代理，可用于解锁流媒体、规避IP验证等作用.
 *   **目标域名管理:** 提供域名黑名单管理，可用于禁止访问指定网站.
 *   **BT下载管理:** 可用于禁止下载P2P相关内容.
-*   **更多内容请访问[官方网站](https://www.v2ray-agent.com/categories/jiao-cheng)、[备用](https://www.592083.com/categories/jiao-cheng)**
+*   **更多内容请访问[官方网站](https://www.v2ray-agent.com/categories/jiao-cheng)
 
 ## 快速开始
 
