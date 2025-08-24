@@ -1,7 +1,5 @@
 
 
-Xray-core/sing-box 一键脚本快速安装
-
 ## 功能
 
 *   **多核心支持:** 支持 Xray-core 和 sing-box.
